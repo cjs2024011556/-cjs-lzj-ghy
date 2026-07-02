@@ -1,0 +1,92 @@
+[project]
+name = "a1-maintenance-backend"
+version = "0.1.0"
+description = "基于多模态大模型技术的设备检修知识检索与作业系统 - 后端"
+authors = [{ name = "A1 Team" }]
+readme = "README.md"
+requires-python = ">=3.11"
+
+# 核心依赖
+dependencies = [
+    # Web 框架
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+
+    # 数据库
+    "sqlalchemy>=2.0.27",
+    "alembic>=1.13.1",
+    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.9",
+    "pymilvus>=2.4.0",
+    "neo4j>=5.20.0",
+    "minio>=7.2.0",
+
+    # 阿里云百炼 SDK
+    "dashscope>=1.17.0",
+    "openai>=1.12.0",
+
+    # Embedding & 本地模型
+    "sentence-transformers>=2.6.0",
+    "transformers>=4.40.0",
+    "torch>=2.2.0",
+    "Pillow>=10.2.0",
+
+    # 文档解析
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
+    "pdfplumber>=0.10.0",
+    "PaddleOCR>=2.7.0.3; platform_machine != 'loongarch64'",
+
+    # LangChain 工具链
+    "langchain>=0.1.0",
+    "langchain-community>=0.0.20",
+    "langchain-text-splitters>=0.0.1",
+
+    # 工具
+    "httpx>=0.27.0",
+    "loguru>=0.7.2",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    "tenacity>=8.2.3",
+    "cachetools>=5.3.3",
+    "redis>=5.0.1",
+    "celery>=5.3.6",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "tiktoken>=0.6.0",
+    "pypinyin>=0.49.0",  # 中文处理
+    "jieba>=0.42.1",     # 中文分词
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.4",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.27.0",
+    "black>=24.1.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N"]
+ignore = ["E501", "B008"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

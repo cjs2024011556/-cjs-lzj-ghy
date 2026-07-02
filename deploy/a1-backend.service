@@ -1,0 +1,38 @@
+# ============================================
+# A1 设备检修智能系统 - systemd 服务
+# 用于 LoongArch + 银河麒麟 平台
+# ============================================
+
+[Unit]
+Description=A1 Maintenance System Backend (FastAPI)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=a1user
+Group=a1user
+WorkingDirectory=/opt/a1/backend
+Environment="PATH=/opt/a1/backend/.venv/bin"
+EnvironmentFile=/opt/a1/.env
+ExecStart=/opt/a1/backend/.venv/bin/uvicorn app.main:app \
+    --host 0.0.0.0 --port 8000 \
+    --workers 2 \
+    --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/a1/backend.log
+StandardError=append:/var/log/a1/backend-error.log
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=65536
+
+# 安全
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

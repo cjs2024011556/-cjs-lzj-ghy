@@ -1,0 +1,388 @@
+// ============================================================
+// 全局样式 - 工业风（深色高对比） + 主题切换支持
+// ============================================================
+@use './tokens';
+@use './themes';
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-normal);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--transition-base), color var(--transition-base);
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+// ============================================================
+// Element Plus 白色简约主题（默认浅色）
+// ============================================================
+.el-card {
+  background: #ffffff !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition-base), border-color var(--transition-base), box-shadow var(--transition-base);
+}
+
+.el-button--primary {
+  background: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+  color: #ffffff !important;
+  font-weight: var(--font-weight-medium);
+  box-shadow: 0 1px 2px rgba(var(--primary-rgb), 0.15);
+  transition: all var(--transition-base) !important;
+
+  &:hover, &:focus {
+    background: var(--primary-dark) !important;
+    border-color: var(--primary-dark) !important;
+    box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.25);
+    transform: translateY(-1px);
+  }
+
+  &:active:not(.is-disabled) {
+    transform: scale(0.97) translateY(0);
+  }
+
+  // 暗色主题下用更亮的蓝色
+  [data-theme='dark'] & {
+    background: var(--primary-color) !important;
+  }
+}
+
+// ============================================================
+// U.1.2 全局 focus ring（Tab 键聚焦可见）
+// ============================================================
+*:focus-visible {
+  outline: 2px solid rgba(var(--primary-rgb), 0.5);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.el-button,
+.el-input,
+.el-textarea,
+.el-select {
+  &:focus-visible {
+    outline: none;  // Element Plus 已有自己的 focus 样式
+  }
+}
+
+// ============================================================
+// U.1.3 全局 active scale（按钮按下反馈）
+// ============================================================
+.el-button {
+  transition: all var(--transition-fast) !important;
+
+  &:active:not(.is-disabled):not(.is-loading) {
+    transform: scale(0.97);
+  }
+}
+
+// ============================================================
+// U.1.4 表格行 hover 统一（左侧 3px primary 色条 + 浅色背景）
+// ============================================================
+.el-table {
+  tr {
+    position: relative;
+    transition: background var(--transition-fast);
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--primary-color);
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+
+    &:hover {
+      background: rgba(var(--primary-rgb), 0.05) !important;
+
+      &::before {
+        opacity: 1;
+      }
+
+      > td.el-table__cell {
+        background: rgba(var(--primary-rgb), 0.05) !important;
+      }
+    }
+  }
+}
+
+.el-button {
+  transition: all var(--transition-fast);
+}
+
+.el-input__wrapper {
+  background: #ffffff !important;
+  box-shadow: 0 0 0 1px var(--border-color) inset !important;
+  border-radius: var(--radius-md);
+  transition: box-shadow var(--transition-fast), background var(--transition-fast);
+
+  &:hover {
+    box-shadow: 0 0 0 1px var(--primary-color) inset !important;
+  }
+
+  &.is-focus {
+    box-shadow: 0 0 0 2px var(--primary-color) inset !important;
+  }
+}
+
+.el-textarea__inner {
+  background: #ffffff !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.el-menu {
+  background: transparent !important;
+  border: none !important;
+}
+
+.el-menu-item, .el-sub-menu__title {
+  color: var(--text-secondary) !important;
+
+  &:hover {
+    background: rgba(var(--primary-rgb), 0.06) !important;
+    color: var(--primary-color) !important;
+  }
+
+  &.is-active {
+    color: var(--primary-color) !important;
+    background: rgba(var(--primary-rgb), 0.1) !important;
+    font-weight: var(--font-weight-medium);
+  }
+}
+
+.el-table {
+  background: #ffffff !important;
+  color: var(--text-primary) !important;
+
+  th.el-table__cell {
+    background: #f8fafc !important;
+    color: var(--text-secondary) !important;
+    font-weight: var(--font-weight-semibold);
+    border-bottom: 1px solid var(--border-color) !important;
+  }
+
+  td.el-table__cell {
+    border-bottom: 1px solid var(--border-color) !important;
+  }
+
+  tr {
+    background: var(--bg-tertiary) !important;
+
+    &:hover > td.el-table__cell {
+      background: var(--bg-elevated) !important;
+    }
+  }
+}
+
+.el-tag {
+  border: 1px solid var(--border-light) !important;
+}
+
+.el-dialog {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+.el-message-box {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+// 亮色主题下对话框头部用更亮的背景
+[data-theme="light"] {
+  .el-dialog__header {
+    background: var(--bg-secondary);
+  }
+  .el-card {
+    box-shadow: var(--shadow-sm);
+  }
+  .el-table th.el-table__cell {
+    background: var(--bg-primary) !important;
+  }
+}
+
+// ============================================================
+// 工具类
+// ============================================================
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
+.text-accent { color: var(--primary-color); }
+.text-success { color: var(--success); }
+.text-warning { color: var(--warning); }
+.text-danger { color: var(--danger); }
+
+.bg-primary { background: var(--bg-primary); }
+.bg-secondary { background: var(--bg-secondary); }
+.bg-tertiary { background: var(--bg-tertiary); }
+
+.mt-xs { margin-top: var(--spacing-xs); }
+.mt-sm { margin-top: var(--spacing-sm); }
+.mt-md { margin-top: var(--spacing-md); }
+.mt-lg { margin-top: var(--spacing-lg); }
+.mb-md { margin-bottom: var(--spacing-md); }
+.mb-lg { margin-bottom: var(--spacing-lg); }
+.p-md { padding: var(--spacing-md); }
+.p-lg { padding: var(--spacing-lg); }
+
+// 字号工具类
+.text-xs { font-size: var(--font-size-xs); }
+.text-sm { font-size: var(--font-size-sm); }
+.text-md { font-size: var(--font-size-md); }
+.text-lg { font-size: var(--font-size-lg); }
+.text-xl { font-size: var(--font-size-xl); }
+.text-2xl { font-size: var(--font-size-2xl); }
+.text-3xl { font-size: var(--font-size-3xl); }
+.text-4xl { font-size: var(--font-size-4xl); }
+
+// ============================================================
+// 滚动条
+// ============================================================
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-sm);
+
+  &:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+}
+
+// ============================================================
+// 页面布局
+// ============================================================
+.page-container {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: var(--spacing-lg);
+}
+
+.section-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 2px solid var(--primary-color);
+  display: inline-block;
+}
+
+// ============================================================
+// U.3.6 NProgress 主题色（跟随 primary）
+// ============================================================
+#nprogress {
+  z-index: 9999 !important;
+}
+#nprogress .bar {
+  background: var(--primary-color) !important;
+  height: 3px !important;
+  box-shadow: 0 0 8px var(--primary-color) !important;
+}
+#nprogress .peg {
+  box-shadow: 0 0 12px var(--primary-color), 0 0 4px var(--primary-color) !important;
+}
+
+// ============================================================
+// 动画
+// ============================================================
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn var(--transition-base) ease-out;
+}
+
+// ============================================================
+// U.2.3 Staggered 入场动画（卡片依次浮现）
+// 用法：父元素加 class="stagger"，子元素自动错开 50ms 入场
+// ============================================================
+.stagger > * {
+  opacity: 0;
+  animation: stagger-in 0.4s ease-out forwards;
+}
+
+@for $i from 1 through 12 {
+  .stagger > *:nth-child(#{$i}) {
+    animation-delay: calc(#{$i} * var(--stagger-step));
+  }
+}
+
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ============================================================
+// U.1.6 路由过渡（fade + 上移 8px + 0.25s）
+// ============================================================
+.fade-enter-active,
+.fade-leave-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.slide-in {
+  animation: slideIn var(--transition-base) ease-out;
+}

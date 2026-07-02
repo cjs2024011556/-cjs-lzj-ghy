@@ -1,0 +1,92 @@
+/**
+ * 主题系统 - 默认浅色（白底 + 静谧蓝）+ 暗色可选
+ * 设计风格：参考 ChatGPT / Notion 简洁现代
+ * 浅色 = :root（默认）
+ * 暗色 = [data-theme="dark"]
+ */
+
+// ============================================================
+// 浅色（默认，ChatGPT 风格）
+// ============================================================
+:root,
+[data-theme="light"] {
+  // 主色调（静谧蓝 #2563EB）
+  --primary-color: #2563EB;
+  --primary-dark: #1D4ED8;
+  --primary-light: #60A5FA;
+  --primary-rgb: 37, 99, 235;
+
+  // 背景（白 + 极浅灰）
+  --bg-primary: #ffffff;        // 主背景
+  --bg-secondary: #f8fafc;      // 次背景（卡片/侧边栏）
+  --bg-tertiary: #f1f5f9;       // 卡片内部
+  --bg-elevated: #ffffff;       // 弹层
+
+  // 文字（深灰）
+  --text-primary: #0f172a;      // 主文字
+  --text-secondary: #475569;    // 次文字
+  --text-muted: #94a3b8;        // 弱化
+  --text-disabled: #cbd5e1;     // 禁用
+  --text-inverse: #ffffff;      // 反色（按钮文字）
+
+  // 边框（浅灰）
+  --border-color: #e5e7eb;
+  --border-light: #f1f5f9;
+
+  // 状态色
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+
+  // 滚动条
+  --scrollbar-track: #f8fafc;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
+
+  // 阴影（柔和）
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 2px 8px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.1);
+  --shadow-xl: 0 16px 48px rgba(15, 23, 42, 0.12);
+  --shadow-glow: 0 0 12px rgba(var(--primary-rgb), 0.25);
+}
+
+// ============================================================
+// 暗色（保留为可切换选项）
+// ============================================================
+[data-theme="dark"] {
+  --primary-color: #60A5FA;
+  --primary-dark: #2563EB;
+  --primary-light: #93C5FD;
+  --primary-rgb: 96, 165, 250;
+
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --bg-elevated: #1e293b;
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-disabled: #475569;
+  --text-inverse: #0f172a;
+
+  --border-color: #334155;
+  --border-light: #475569;
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60A5FA;
+
+  --scrollbar-track: #1e293b;
+  --scrollbar-thumb: #475569;
+  --scrollbar-thumb-hover: #94a3b8;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 12px rgba(var(--primary-rgb), 0.5);
+}

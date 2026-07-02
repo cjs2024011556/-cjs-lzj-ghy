@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+.cache/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Project specific
+uploads/*
+!uploads/.gitkeep
+logs/*
+!logs/.gitkeep
+backend/data/raw/*
+!backend/data/raw/.gitkeep
+backend/data/indexed/*
+!backend/data/indexed/.gitkeep
+backend/data/models/*
+!backend/data/models/.gitkeep
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+backend/data/postgres/
+backend/data/minio/
+backend/data/milvus/
+backend/data/neo4j/
+
+# Models
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+backend/data/models/local/
+
+# OS
+.DS_Store
+desktop.ini

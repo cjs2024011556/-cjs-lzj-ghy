@@ -1,0 +1,40 @@
+/**
+ * 检索相关 API
+ */
+import { post, postForm, get } from './index'
+
+export interface RetrievalHit {
+  chunk_id: string
+  content: string
+  source: string
+  doc_type: string
+  equipment_type: string
+  equipment_model: string
+  score: number
+  chunk_index: number
+}
+
+export interface RetrievalResponse {
+  query: string
+  answer: string
+  hits: RetrievalHit[]
+  model: string
+  latency_ms: number
+  usage: Record<string, number>
+}
+
+export function retrieveByText(payload: {
+  query: string
+  equipment_model?: string
+  top_k?: number
+}) {
+  return post<RetrievalResponse>('/retrieval/text', payload)
+}
+
+export function retrieveMultimodal(formData: FormData) {
+  return postForm<RetrievalResponse>('/retrieval/multimodal', formData)
+}
+
+export function retrievalStats() {
+  return get<{ indexed_chunks: number }>('/retrieval/stats')
+}

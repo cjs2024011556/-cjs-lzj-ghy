@@ -1,0 +1,44 @@
+{
+  "name": "a1-maintenance-frontend",
+  "version": "0.1.0",
+  "description": "设备检修智能系统前端 - Vue 3 + TypeScript + Element Plus",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.ts,.tsx --fix",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@types/dompurify": "^3.0.5",
+    "@types/nprogress": "^0.2.3",
+    "axios": "^1.6.8",
+    "dompurify": "^3.4.11",
+    "echarts": "^5.5.0",
+    "element-plus": "^2.7.0",
+    "file-saver": "^2.0.5",
+    "highlight.js": "^11.9.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "marked": "^12.0.0",
+    "nprogress": "^0.2.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
+    "vue-echarts": "^7.0.3",
+    "vue-router": "^4.3.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "sass": "^1.72.0",
+    "typescript": "^5.4.3",
+    "unplugin-auto-import": "^0.17.5",
+    "unplugin-vue-components": "^0.26.0",
+    "vite": "^5.2.6",
+    "vue-tsc": "^2.0.7"
+  }
+}

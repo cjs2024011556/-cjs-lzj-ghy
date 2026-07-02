@@ -1,0 +1,54 @@
+# A1 设备检修智能系统 - 后端依赖
+# 适用于 LoongArch + 麒麟 / Windows / Linux
+
+# === Web 框架 ===
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+
+# === 数据库 ===
+sqlalchemy>=2.0.27
+alembic>=1.13.1
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+pymilvus>=2.4.0
+neo4j>=5.20.0
+minio>=7.2.0
+
+# === 阿里云百炼 SDK ===
+dashscope>=1.17.0
+openai>=1.12.0
+
+# === Embedding & 本地模型 ===
+# 注意：LoongArch 上需找适配的 wheel，或用 API 模式
+sentence-transformers>=2.6.0
+transformers>=4.40.0
+torch>=2.2.0
+Pillow>=10.2.0
+
+# === 文档解析 ===
+pypdf>=4.0.0
+python-docx>=1.1.0
+pdfplumber>=0.10.0
+
+# === LangChain 工具链 ===
+langchain>=0.1.0
+langchain-community>=0.0.20
+langchain-text-splitters>=0.0.1
+
+# === 工具 ===
+httpx>=0.27.0
+loguru>=0.7.2
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+tenacity>=8.2.3
+cachetools>=5.3.3
+redis>=5.0.1
+celery>=5.3.6
+numpy>=1.26.0
+pandas>=2.2.0
+tiktoken>=0.6.0
+pypinyin>=0.49.0
+jieba>=0.42.1

@@ -11,10 +11,13 @@ from enum import Enum
 from pathlib import Path
 import shutil
 import time
+import json
 
 from app.services.knowledge_service import KnowledgeService
 from app.core.config import settings, MANUALS_DIR, CASES_FILE, SOPS_FILE
 from app.core.logger import logger
+# H-Fix-3: 上传/删除文件后失效关键词 fallback 缓存
+from app.api.v1.chat import invalidate_keyword_cache
 
 router = APIRouter()
 _service = KnowledgeService()
@@ -265,20 +268,16 @@ async def upload_manual(file: UploadFile = File(..., description="知识库文�
             section_count = 0
 
     # 尝试 Milvus 索引（如果可用）
-    if section_count > 0 and ext in {".pdf", ".docx"}:
+    # FIX-Upload-1: 复用上面的 chunks，不再重复 parse（PDF parse 一次要 9s+）
+    if section_count > 0 and ext in {".pdf", ".docx"} and chunks:
         try:
             from app.services.vector_indexer import MilvusIndexer
             indexer = MilvusIndexer()
             indexer._ensure_connected()
             if indexer._collection is not None:
-                # 单独索引这一个文件
-                from app.services.document_parser import DocumentParser
-                parser = DocumentParser()
-                chunks = parser.parse(str(target))
-                if chunks:
-                    indexer.index_chunks(chunks, doc_type="manual_upload")
-                    indexed_in_milvus = True
-                    logger.info(f"✅ Milvus 索引完成: {filename}（{len(chunks)} 段）")
+                indexer.index_chunks(chunks, doc_type="manual_upload")
+                indexed_in_milvus = True
+                logger.info(f"✅ Milvus 索引完成: {filename}（{len(chunks)} 段）")
         except Exception as e:
             logger.warning(f"Milvus 索引失败（仅 keyword_fallback）: {e}")
 
@@ -289,6 +288,13 @@ async def upload_manual(file: UploadFile = File(..., description="知识库文�
         f"sections={section_count}, milvus={indexed_in_milvus})"
     )
 
+    # H-Fix-3: 让 keyword_fallback 下次重新读磁盘，命中新文件
+    invalidate_keyword_cache()
+
+    # PDF-A.6: 快速结构摘要（仅写占位，避免上传时再 parse 一次）
+    # 完整结构在 GET /manuals/{name}/structure 时按需构建
+    structure_info = _build_structure_summary_quick(target, ext, section_count)
+
     return {
         "success": True,
         "filename": target.name,
@@ -298,6 +304,8 @@ async def upload_manual(file: UploadFile = File(..., description="知识库文�
         "section_count": section_count,
         "indexed_in_milvus": indexed_in_milvus,
         "searchable_now": searchable_now,
+        # PDF-A.6
+        "structure": structure_info,
         "message": (
             f"已保存 {target.name}（{section_count} 段），"
             f"已 Milvus 索引" if indexed_in_milvus else
@@ -305,6 +313,103 @@ async def upload_manual(file: UploadFile = File(..., description="知识库文�
             f"关键词搜索立即可用" + ("（.md 副本可被 fallback 搜到）" if parsed_md else "")
         )
     }
+
+
+def _build_structure_summary_quick(target: Path, ext: str, section_count: int) -> dict:
+    """FIX-Upload-1: 上传时只写最小元数据（避免再 parse 一次 PDF）
+
+    完整结构（章节树 + 表格清单）由 GET /manuals/{name}/structure 时按需构建。
+    """
+    if ext not in {".pdf", ".md", ".markdown"}:
+        return None
+    struct = {
+        "outline": [],
+        "tables": [],
+        "page_count": 0,
+        "chunk_count": section_count,
+        "cached_at": time.time(),
+        "pending": True,  # 标记：完整结构待首次访问时构建
+    }
+    try:
+        struct_path = target.parent / f"{target.stem}.structure.json"
+        struct_path.write_text(
+            json.dumps(struct, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        # 移除 pending 字段，返回给前端时用
+        return {k: v for k, v in struct.items() if k != "pending"}
+    except Exception as e:
+        logger.warning(f"写结构占位失败: {e}")
+        return None
+
+
+def _build_structure_summary(target: Path, ext: str) -> dict:
+    """PDF-A.6: 解析文档结构（章节树 + 表格清单），持久化 .structure.json
+
+    - .pdf → PdfplumberPdfLoader + StructureDetector
+    - .md  → 用 ##/### 简单解析
+    - 其他 → 返回 None
+    """
+    try:
+        if ext == ".pdf":
+            from app.services.pdf_loader import PdfplumberPdfLoader
+            from app.services.structure_detector import (
+                StructureDetector, OutlineItem, TableDigest,
+            )
+            pages = PdfplumberPdfLoader().load(target)
+            sections = StructureDetector().detect(pages)
+            detector = StructureDetector()
+            outline = [
+                {"level": i.level, "title": i.title, "page_start": i.page_start}
+                for i in detector.build_outline(sections)
+            ]
+            tables = [
+                {"page": t.page, "rows": t.rows, "cols": t.cols, "preview": t.preview}
+                for t in detector.build_tables_digest(sections)
+            ]
+            page_count = len(pages)
+            chunk_count = 0  # 不知道精确 chunk 数（要重新走 _parse_pdf_structured）
+        elif ext in {".md", ".markdown"}:
+            text = target.read_text(encoding="utf-8", errors="ignore")
+            outline, tables, page_count, chunk_count = [], [], 0, 0
+            for line in text.splitlines():
+                if line.startswith("### "):
+                    outline.append({"level": 3, "title": line[4:].strip(), "page_start": 0})
+                elif line.startswith("## "):
+                    outline.append({"level": 2, "title": line[3:].strip(), "page_start": 0})
+                elif line.startswith("# "):
+                    outline.append({"level": 1, "title": line[2:].strip(), "page_start": 0})
+        else:
+            return None
+
+        struct = {
+            "outline": outline,
+            "tables": tables,
+            "page_count": page_count,
+            "chunk_count": chunk_count,
+            "cached_at": time.time(),
+        }
+        # 持久化到磁盘
+        struct_path = target.parent / f"{target.stem}.structure.json"
+        struct_path.write_text(
+            json.dumps(struct, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return struct
+    except Exception as e:
+        logger.warning(f"⚠️ 结构解析失败 {target.name}: {e}")
+        return None
+
+
+def _read_structure_summary(filename: str) -> dict | None:
+    """读取持久化的结构摘要（.structure.json）"""
+    struct_path = MANUALS_DIR / f"{Path(filename).stem}.structure.json"
+    if not struct_path.exists():
+        return None
+    try:
+        return json.loads(struct_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 @router.get("/manuals")
@@ -331,7 +436,354 @@ async def delete_manual(filename: str):
     if not target.is_file():
         raise HTTPException(status_code=400, detail="不是文件")
     target.unlink()
+    # H-Fix-3: 让 keyword_fallback 下次重新读磁盘，移除已删条目
+    invalidate_keyword_cache()
     return {"deleted": filename}
+
+
+@router.get("/manuals/{filename}/content")
+async def get_manual_content(filename: str):
+    """FEAT: 查看上传手册的内容
+
+    - .md / .txt / .markdown：直接返回 UTF-8 文本
+    - .pdf / .docx：用 DocumentParser 解析后返回 Markdown 文本
+    - 限制最大返回 200KB（防止巨大文档卡死前端）
+    """
+    target = MANUALS_DIR / filename
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail="不是文件")
+
+    ext = target.suffix.lower()
+    MAX_RETURN_BYTES = 200 * 1024
+    truncated = False
+
+    try:
+        if ext in {".md", ".txt", ".markdown"}:
+            text = target.read_text(encoding="utf-8", errors="ignore")
+        elif ext == ".pdf":
+            from app.services.document_parser import DocumentParser
+            chunks = DocumentParser().parse(str(target))
+            text = "\n\n---\n\n".join(c.content for c in chunks) if chunks else target.read_text(encoding="utf-8", errors="ignore")
+        elif ext in {".docx", ".doc"}:
+            from app.services.document_parser import DocumentParser
+            chunks = DocumentParser().parse(str(target))
+            text = "\n\n---\n\n".join(c.content for c in chunks) if chunks else target.read_text(encoding="utf-8", errors="ignore")
+        else:
+            # 其他类型：尝试按文本读
+            text = target.read_text(encoding="utf-8", errors="ignore")
+    except Exception as e:
+        logger.error(f"读取手册 {filename} 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"读取失败: {e}")
+
+    if len(text.encode("utf-8")) > MAX_RETURN_BYTES:
+        text = text.encode("utf-8")[:MAX_RETURN_BYTES].decode("utf-8", errors="ignore")
+        truncated = True
+
+    return {
+        "filename": filename,
+        "ext": ext,
+        "size_kb": round(target.stat().st_size / 1024, 1),
+        "content": text,
+        "truncated": truncated,
+    }
+
+
+# ============================================================
+# PDF-A.6: 新增端点 — 结构摘要 + 重建索引
+# ============================================================
+@router.get("/manuals/{filename}/structure")
+async def get_manual_structure(filename: str):
+    """PDF-A.6: 获取手册结构化摘要（章节树 + 表格清单 + 元数据）
+
+    Returns:
+        {
+            "filename": "焊接工艺手册.pdf",
+            "outline": [{"level": 1, "title": "第1章 液压系统", "page_start": 1}, ...],
+            "tables": [{"page": 23, "rows": 4, "cols": 3, "preview": "..."}, ...],
+            "page_count": 56,
+            "chunk_count": 184,
+            "cached": true | false
+        }
+
+    若 .structure.json 不存在（首次上传没缓存），会即时构建一次并写入磁盘。
+    """
+    target = MANUALS_DIR / filename
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    ext = target.suffix.lower()
+
+    # 优先读缓存
+    cached = _read_structure_summary(filename)
+    if cached:
+        # FIX-Upload-1: 如果是 quick 占位（pending=True 或 outline 为空），
+        # 触发完整构建
+        if cached.get("pending") or (
+            not cached.get("outline") and not cached.get("tables")
+            and ext == ".pdf"
+        ):
+            logger.info(f"结构占位 → 触发完整构建: {filename}")
+            full = _build_structure_summary(target, ext)
+            if full:
+                cached = full
+                cached["cached"] = True  # 标记为已缓存
+        return {
+            "filename": filename,
+            "ext": ext,
+            "outline": cached.get("outline", []),
+            "tables": cached.get("tables", []),
+            "page_count": cached.get("page_count", 0),
+            "chunk_count": cached.get("chunk_count", 0),
+            "cached": True,
+        }
+
+    # 没缓存：即时构建
+    summary = _build_structure_summary(target, ext)
+    if summary is None:
+        return {
+            "filename": filename,
+            "ext": ext,
+            "outline": [],
+            "tables": [],
+            "page_count": 0,
+            "chunk_count": 0,
+            "cached": False,
+            "note": "此文件类型暂不支持结构解析",
+        }
+
+    return {
+        "filename": filename,
+        "ext": ext,
+        "outline": summary.get("outline", []),
+        "tables": summary.get("tables", []),
+        "page_count": summary.get("page_count", 0),
+        "chunk_count": summary.get("chunk_count", 0),
+        "cached": False,
+    }
+
+
+@router.post("/manuals/{filename}/reindex")
+async def reindex_manual(filename: str):
+    """PDF-A.6: 重建单本手册的索引（删除旧 Milvus chunks → 重走流水线）"""
+    from app.services.vector_indexer import MilvusIndexer
+    target = MANUALS_DIR / filename
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if target.suffix.lower() not in {".pdf", ".docx", ".doc"}:
+        raise HTTPException(status_code=400, detail="仅支持 PDF / Word 重建索引")
+
+    try:
+        # 1. 删除旧
+        indexer = MilvusIndexer()
+        indexer._ensure_connected()
+        deleted = await indexer.delete_by_source(str(target))
+        invalidate_keyword_cache()
+
+        # 2. 重新解析 + 索引
+        from app.services.document_parser import DocumentParser
+        chunks = DocumentParser().parse(str(target))
+        if not chunks:
+            return {"reindexed": 0, "deleted": deleted, "filename": filename}
+
+        inserted = await indexer.index_chunks(chunks, doc_type="manual_upload")
+        return {
+            "reindexed": inserted,
+            "deleted": deleted,
+            "filename": filename,
+            "success": True,
+        }
+    except Exception as e:
+        logger.exception(f"重建索引失败: {filename}")
+        raise HTTPException(status_code=500, detail=f"重建失败: {e}")
+
+
+@router.post("/reindex")
+async def reindex_all():
+    """PDF-A.6: 重建 manuals 目录全部 PDF/Word 的 Milvus 索引
+
+    步骤：
+    1. 删 a1_knowledge collection
+    2. 重建（新 schema 字段）
+    3. 遍历 manuals 目录逐个重新解析 + 索引
+    """
+    try:
+        from app.services.vector_indexer import MilvusIndexer
+        from app.services.document_parser import DocumentParser
+
+        indexer = MilvusIndexer()
+        indexer._ensure_connected()
+        # 触发 schema 自检（不匹配自动重建）
+        total = 0
+        results = []
+
+        for path in sorted(MANUALS_DIR.glob("*")):
+            if not path.is_file():
+                continue
+            ext = path.suffix.lower()
+            if ext not in {".pdf", ".docx", ".doc"}:
+                continue
+            try:
+                chunks = DocumentParser().parse(str(path))
+                if not chunks:
+                    continue
+                inserted = await indexer.index_chunks(chunks, doc_type="manual_upload")
+                total += inserted
+                results.append({
+                    "filename": path.name,
+                    "chunks": inserted,
+                    "ok": True,
+                })
+                logger.info(
+                    f"✅ Reindex {path.name}: {inserted} chunks"
+                )
+            except Exception as e:
+                results.append({
+                    "filename": path.name,
+                    "ok": False,
+                    "error": str(e),
+                })
+                logger.warning(f"⚠️ 重建 {path.name} 失败: {e}")
+
+        invalidate_keyword_cache()
+        return {
+            "success": True,
+            "total_chunks": total,
+            "files": results,
+        }
+    except Exception as e:
+        logger.exception("全量重建索引失败")
+        raise HTTPException(status_code=500, detail=f"全量重建失败: {e}")
+
+
+# ============================================================
+# PDF-B.6: 新增端点 — 视觉重分析（聚群 B 多模态增强）
+# ============================================================
+@router.post("/manuals/{filename}/re-analyze")
+async def reanalyze_manual(filename: str, force: bool = False):
+    """PDF-B.6: 视觉重分析（聚群 B）
+
+    对已上传的 PDF 重新跑一遍 VL 增强流程：
+    1. 删除该 PDF 在 Milvus 的旧 chunks
+    2. 用 parse_pdf_with_vl 重解析（含 image_description / image_facts）
+    3. 重新插入
+
+    Args:
+        filename: PDF 文件名
+        force: True 时强制启用 VL（否则只在文字 < 30 字符的页触发）
+
+    Returns:
+        {reindexed, deleted, vl_pages_processed, filename}
+    """
+    target = MANUALS_DIR / filename
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if target.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=400, detail="仅支持 PDF 视觉重分析")
+
+    try:
+        from app.services.vector_indexer import MilvusIndexer
+        from app.services.document_parser import DocumentParser
+
+        indexer = MilvusIndexer()
+        indexer._ensure_connected()
+        deleted = await indexer.delete_by_source(str(target))
+        invalidate_keyword_cache()
+
+        parser = DocumentParser()
+        chunks = await parser.parse_pdf_with_vl(
+            str(target),
+            enable_vl=True,
+            trigger_on_scanned=force or True,
+            trigger_on_table_pages=force,
+        )
+        if not chunks:
+            return {
+                "reindexed": 0, "deleted": deleted,
+                "vl_pages_processed": 0, "filename": filename,
+            }
+        inserted = await indexer.index_chunks(chunks, doc_type="manual_upload")
+        vl_pages = sum(
+            1 for c in chunks if c.metadata.get("image_description")
+        )
+        return {
+            "reindexed": inserted,
+            "deleted": deleted,
+            "vl_pages_processed": vl_pages,
+            "filename": filename,
+            "success": True,
+        }
+    except Exception as e:
+        logger.exception(f"视觉重分析失败: {filename}")
+        raise HTTPException(status_code=500, detail=f"视觉重分析失败: {e}")
+
+
+@router.post("/re-analyze-all")
+async def reanalyze_all(force: bool = False):
+    """PDF-B.6: 全量视觉重分析（聚群 B）
+
+    对 manuals 目录下所有 PDF 重新跑 VL 增强。耗时较长（每页 ~2-3s）。
+    """
+    from app.services.vector_indexer import MilvusIndexer
+    from app.services.document_parser import DocumentParser
+
+    try:
+        indexer = MilvusIndexer()
+        indexer._ensure_connected()
+
+        total_chunks = 0
+        total_vl_pages = 0
+        results = []
+        for path in sorted(MANUALS_DIR.glob("*.pdf")):
+            if not path.is_file():
+                continue
+            try:
+                # 先删旧
+                deleted = await indexer.delete_by_source(str(path))
+                # 再跑 VL
+                parser = DocumentParser()
+                chunks = await parser.parse_pdf_with_vl(
+                    str(path),
+                    enable_vl=True,
+                    trigger_on_scanned=force or True,
+                    trigger_on_table_pages=force,
+                )
+                if not chunks:
+                    results.append({
+                        "filename": path.name, "ok": True,
+                        "chunks": 0, "vl_pages": 0,
+                    })
+                    continue
+                inserted = await indexer.index_chunks(chunks, doc_type="manual_upload")
+                vl_pages = sum(
+                    1 for c in chunks if c.metadata.get("image_description")
+                )
+                total_chunks += inserted
+                total_vl_pages += vl_pages
+                results.append({
+                    "filename": path.name, "ok": True,
+                    "chunks": inserted, "vl_pages": vl_pages,
+                })
+                logger.info(
+                    f"🖼️ Re-analyze {path.name}: {inserted} chunks, "
+                    f"{vl_pages} 页经 VL 增强"
+                )
+            except Exception as e:
+                results.append({
+                    "filename": path.name, "ok": False, "error": str(e),
+                })
+                logger.warning(f"⚠️ 视觉重分析 {path.name} 失败: {e}")
+
+        invalidate_keyword_cache()
+        return {
+            "success": True,
+            "total_chunks": total_chunks,
+            "total_vl_pages": total_vl_pages,
+            "files": results,
+        }
+    except Exception as e:
+        logger.exception("全量视觉重分析失败")
+        raise HTTPException(status_code=500, detail=f"全量视觉重分析失败: {e}")
 
 
 @router.post("/import/all")

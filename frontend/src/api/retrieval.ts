@@ -12,6 +12,17 @@ export interface RetrievalHit {
   equipment_model: string
   score: number
   chunk_index: number
+  // PDF-A.7 聚群 A: 结构化字段
+  page_number?: number
+  page_end?: number
+  chapter?: string
+  section_title?: string
+  section_type?: 'text' | 'table' | 'heading' | 'footer'
+  section_level?: number
+  doc_id?: string
+  // PDF-B.7 聚群 B: 视觉理解字段
+  image_description?: string
+  image_facts?: string
 }
 
 export interface RetrievalResponse {

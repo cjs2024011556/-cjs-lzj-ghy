@@ -1,45 +1,32 @@
 /**
- * 主题切换 Store
- * 暗色（默认）/ 亮色，通过 [data-theme] CSS 变量切换
+ * 主题 Store — 仅保留白色简约风格（light）
+ *
+ * 历史：之前支持 dark/light 切换（任务 A3），现统一为 white 简约风格，
+ * 移除切换按钮（ThemeSwitcher 已删除）。本 store 仍负责在启动时
+ * 把 <html data-theme="light"> 应用上去，兼容旧用户 localStorage。
  */
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-
-type ThemeMode = 'dark' | 'light'
 
 const STORAGE_KEY = 'a1_theme'
+type ThemeMode = 'light' | 'dark'
 
 export const useThemeStore = defineStore('theme', () => {
-  const theme = ref<ThemeMode>('dark')
-
   function init() {
+    // 不论 localStorage 之前存的是什么，都强制设为 light（白简约）
+    apply('light')
+    // 清掉旧值，避免误导
     try {
-      const saved = localStorage.getItem(STORAGE_KEY) as ThemeMode | null
-      if (saved === 'dark' || saved === 'light') {
-        theme.value = saved
-      } else {
-        // 默认暗色
-        theme.value = 'dark'
-      }
+      localStorage.removeItem(STORAGE_KEY)
     } catch {
-      theme.value = 'dark'
+      /* localStorage 可能不可用，忽略 */
     }
-    apply()
   }
 
-  function apply() {
-    document.documentElement.setAttribute('data-theme', theme.value)
+  function apply(mode: ThemeMode) {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', mode)
+    }
   }
 
-  function setTheme(mode: ThemeMode) {
-    theme.value = mode
-    localStorage.setItem(STORAGE_KEY, mode)
-    apply()
-  }
-
-  function toggle() {
-    setTheme(theme.value === 'dark' ? 'light' : 'dark')
-  }
-
-  return { theme, init, setTheme, toggle }
+  return { init }
 })

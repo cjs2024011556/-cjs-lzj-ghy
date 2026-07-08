@@ -5,9 +5,11 @@
  * - 3 个 mock 账号（admin / 检修员 / 审核员）
  * - localStorage 持久化 token
  * - 路由元信息 auth.requiresAuth 守卫
+ * - **登录态变化时同步切换 chatHistory.setUser（聊天历史按用户隔离）**
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useChatHistoryStore } from './chatHistory'
 
 export interface UserInfo {
   username: string
@@ -79,6 +81,8 @@ export const useAuthStore = defineStore('auth', () => {
         const data = JSON.parse(raw)
         user.value = data.user
         token.value = data.token
+        // 注意：不要在这里调 setUser()，路由守卫运行早于 chatHistory store 初始化
+        // setUser 由 Layout.vue 的 onMounted 统一调用
       }
     } catch (e) {
       console.error('恢复登录状态失败:', e)
@@ -104,6 +108,8 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (e) {
       console.error('保存登录状态失败:', e)
     }
+    // 切换聊天历史到当前用户
+    useChatHistoryStore().setUser(user.value.username)
     return { success: true }
   }
 
@@ -112,6 +118,8 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     token.value = ''
     localStorage.removeItem(STORAGE_KEY)
+    // 清空内存中的聊天历史（不动其他用户的 localStorage 数据）
+    useChatHistoryStore().setUser(null)
   }
 
   /** 切换账号（演示用） */

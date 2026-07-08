@@ -248,6 +248,248 @@ class GraphService:
 
         return {"nodes": nodes, "edges": edges}
 
+    def get_node_neighborhood(self, node_id: str) -> Dict[str, Any]:
+        """获取节点详情 + 1-hop 邻居（按方向 + 关系类型分组）
+
+        用于 Graph.vue 双击节点后的右侧/底部详情面板，结构化展示「该节点与外部的连接」。
+
+        Returns:
+            {
+                "node": { id, label, type, color, degree, attrs },
+                "outgoing": [
+                    {
+                        "rel_type": "HAS_PART",
+                        "count": 3,
+                        "neighbors": [{ "id", "label", "type", "color" }, ...]
+                    }, ...
+                ],
+                "incoming": [...],        # 同上结构，反向
+                "summary": {
+                    "total_out": int,
+                    "total_in": int,
+                    "total_unique_neighbors": int,
+                    "by_rel_type": { rel_type: count }
+                }
+            }
+        """
+        if node_id not in self.graph:
+            return {"node": None, "outgoing": [], "incoming": [], "summary": {}, "error": "节点不存在"}
+
+        attrs = dict(self.graph.nodes[node_id])
+        node = {
+            "id": node_id,
+            "label": attrs.get("label", node_id),
+            "type": attrs.get("type", "Unknown"),
+            "color": attrs.get("color", "#999"),
+            "degree": self.graph.degree(node_id),
+            "in_degree": self.graph.in_degree(node_id),
+            "out_degree": self.graph.out_degree(node_id),
+            # 透传其他自定义 attrs（如 description / case_id / sop_id ...）
+            "attrs": {k: v for k, v in attrs.items() if k not in ("label", "type", "color")},
+        }
+
+        # 出边（this → X）
+        out_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for _, t, eattrs in self.graph.out_edges(node_id, data=True):
+            rel_type = eattrs.get("type", "RELATED")
+            if t in self.graph.nodes:
+                t_attrs = self.graph.nodes[t]
+                out_groups[rel_type].append({
+                    "id": t,
+                    "label": t_attrs.get("label", t),
+                    "type": t_attrs.get("type", "Unknown"),
+                    "color": t_attrs.get("color", "#999"),
+                    "weight": eattrs.get("weight", 1),
+                })
+
+        # 入边（Y → this）
+        in_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for s, _, eattrs in self.graph.in_edges(node_id, data=True):
+            rel_type = eattrs.get("type", "RELATED")
+            if s in self.graph.nodes:
+                s_attrs = self.graph.nodes[s]
+                in_groups[rel_type].append({
+                    "id": s,
+                    "label": s_attrs.get("label", s),
+                    "type": s_attrs.get("type", "Unknown"),
+                    "color": s_attrs.get("color", "#999"),
+                    "weight": eattrs.get("weight", 1),
+                })
+
+        # 排序：按 count 降序，同组内按 weight desc
+        def _sort_group(groups: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+            result = []
+            for rel_type, neighbors in groups.items():
+                neighbors_sorted = sorted(neighbors, key=lambda x: -x.get("weight", 0))
+                result.append({"rel_type": rel_type, "count": len(neighbors_sorted), "neighbors": neighbors_sorted})
+            result.sort(key=lambda g: -g["count"])
+            return result
+
+        outgoing_sorted = _sort_group(out_groups)
+        incoming_sorted = _sort_group(in_groups)
+
+        # 摘要
+        unique_neighbors: Set[str] = set()
+        for t in self.graph.successors(node_id):
+            unique_neighbors.add(t)
+        for s in self.graph.predecessors(node_id):
+            unique_neighbors.add(s)
+
+        by_rel: Dict[str, int] = defaultdict(int)
+        for _, _, eattrs in self.graph.edges(node_id, data=True):
+            by_rel[eattrs.get("type", "RELATED")] += 1
+
+        summary = {
+            "total_out": self.graph.out_degree(node_id),
+            "total_in": self.graph.in_degree(node_id),
+            "total_unique_neighbors": len(unique_neighbors),
+            "by_rel_type": dict(by_rel),
+        }
+
+        return {
+            "node": node,
+            "outgoing": outgoing_sorted,
+            "incoming": incoming_sorted,
+            "summary": summary,
+        }
+
+    def get_analytics(self) -> Dict[str, Any]:
+        """图谱分析指标（企业用户视角）
+
+        Returns:
+            {
+                "top_degree_centrality": [
+                    { "id", "label", "type", "color", "degree" }, ...   # top 5 节点按度排序
+                ],
+                "connected_components": {
+                    "count": int,                                      # 连通分量数（有向图弱连通）
+                    "max_size": int,                                   # 最大分量节点数
+                    "sizes_distribution": { "1": x, "2-5": y, ... }    # 分量大小分布
+                },
+                "node_type_density": {
+                    "Device": 6, "Part": 18, ...
+                },
+                "rel_type_density": { "HAS_PART": 12, ... },
+                "shortest_path_sample": {                              # 最大连通分量里的最短路径示例
+                    "source": { id, label, type, color },
+                    "target": { id, label, type, color },
+                    "path": [{ id, label, type, color }, ...],
+                    "length": int
+                } | None,
+            }
+        """
+        if self.graph.number_of_nodes() == 0:
+            return {
+                "top_degree_centrality": [],
+                "connected_components": {"count": 0, "max_size": 0, "sizes_distribution": {}},
+                "node_type_density": {},
+                "rel_type_density": {},
+                "shortest_path_sample": None,
+            }
+
+        # 1. 度中心度 Top 5
+        degree_sorted = sorted(
+            self.graph.degree(),
+            key=lambda x: -x[1],
+        )[:5]
+        top_centrality = []
+        for nid, deg in degree_sorted:
+            attrs = self.graph.nodes[nid]
+            top_centrality.append({
+                "id": nid,
+                "label": attrs.get("label", nid),
+                "type": attrs.get("type", "Unknown"),
+                "color": attrs.get("color", "#999"),
+                "degree": deg,
+            })
+
+        # 2. 连通分量（无向视角，因为有向图弱连通更符合企业用户理解）
+        undirected = self.graph.to_undirected()
+        components = list(nx.connected_components(undirected))
+        comp_sizes = sorted([len(c) for c in components], reverse=True)
+        # 分布桶
+        size_buckets = {"1": 0, "2-5": 0, "6-20": 0, "21-100": 0, "100+": 0}
+        for s in comp_sizes:
+            if s == 1: size_buckets["1"] += 1
+            elif s <= 5: size_buckets["2-5"] += 1
+            elif s <= 20: size_buckets["6-20"] += 1
+            elif s <= 100: size_buckets["21-100"] += 1
+            else: size_buckets["100+"] += 1
+        components_info = {
+            "count": len(components),
+            "max_size": comp_sizes[0] if comp_sizes else 0,
+            "sizes_distribution": {k: v for k, v in size_buckets.items() if v > 0},
+        }
+
+        # 3. 节点 / 关系类型密度
+        type_count: Dict[str, int] = defaultdict(int)
+        for _, attrs in self.graph.nodes(data=True):
+            type_count[attrs.get("type", "Unknown")] += 1
+        rel_count: Dict[str, int] = defaultdict(int)
+        for _, _, attrs in self.graph.edges(data=True):
+            rel_count[attrs.get("type", "Unknown")] += 1
+
+        # 4. 最短路径示例：在最大连通分量里找一条跨度的最短路径
+        # 思路：取最大连通分量的两个距离最远的节点 (eccentricity 最大 / diameter 端点)
+        shortest_path_sample = None
+        try:
+            # 只在最大分量里找（避免全图 O(n²)）
+            largest_cc = max(components, key=len)
+            sub = self.graph.subgraph(largest_cc)
+            if sub.number_of_nodes() >= 2:
+                # 用 BFS 找一条"端到端"的路径（轻度启发：取度数最低的节点对中最远的一对）
+                # 简化：取度最低节点 → 计算它到度最高节点的最短路径
+                lowest_deg_node = min(sub.degree(), key=lambda x: x[1])[0]
+                # BFS 到不同类型（跨设备类型）的节点更"有故事"
+                path = None
+                # 优先取一个不同类型的远端节点
+                type_of_low = sub.nodes[lowest_deg_node].get("type")
+                candidates = [
+                    (n, d) for n, d in sub.degree()
+                    if n != lowest_deg_node and sub.nodes[n].get("type") != type_of_low
+                ]
+                if candidates:
+                    target_node = max(candidates, key=lambda x: x[1])[0]
+                    try:
+                        path = nx.shortest_path(sub, source=lowest_deg_node, target=target_node)
+                    except nx.NetworkXNoPath:
+                        path = None
+                if path and len(path) >= 2:
+                    shortest_path_sample = {
+                        "source": {
+                            "id": path[0],
+                            "label": sub.nodes[path[0]].get("label", path[0]),
+                            "type": sub.nodes[path[0]].get("type", "Unknown"),
+                            "color": sub.nodes[path[0]].get("color", "#999"),
+                        },
+                        "target": {
+                            "id": path[-1],
+                            "label": sub.nodes[path[-1]].get("label", path[-1]),
+                            "type": sub.nodes[path[-1]].get("type", "Unknown"),
+                            "color": sub.nodes[path[-1]].get("color", "#999"),
+                        },
+                        "path": [
+                            {
+                                "id": nid,
+                                "label": sub.nodes[nid].get("label", nid),
+                                "type": sub.nodes[nid].get("type", "Unknown"),
+                                "color": sub.nodes[nid].get("color", "#999"),
+                            }
+                            for nid in path
+                        ],
+                        "length": len(path) - 1,
+                    }
+        except Exception as e:
+            logger.debug(f"计算最短路径示例失败（忽略）: {e}")
+
+        return {
+            "top_degree_centrality": top_centrality,
+            "connected_components": components_info,
+            "node_type_density": dict(type_count),
+            "rel_type_density": dict(rel_count),
+            "shortest_path_sample": shortest_path_sample,
+        }
+
 
 # 单例
 _graph_service: Optional[GraphService] = None

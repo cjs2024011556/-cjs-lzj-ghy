@@ -96,33 +96,33 @@ html, body {
 
 // ============================================================
 // U.1.4 表格行 hover 统一（左侧 3px primary 色条 + 浅色背景）
+// 注意：装饰条挂在 `td:first-child::before`（不是 `tr::before`），
+//       避免给 tr 加 position:relative 破坏 Element Plus el-table 的列对齐计算。
 // ============================================================
 .el-table {
   tr {
-    position: relative;
-    transition: background var(--transition-fast);
+    > td.el-table__cell:first-child {
+      position: relative;
 
-    &::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 3px;
-      background: var(--primary-color);
-      opacity: 0;
-      transition: opacity var(--transition-fast);
+      &::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--primary-color);
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+      }
     }
 
     &:hover {
-      background: rgba(var(--primary-rgb), 0.05) !important;
-
-      &::before {
-        opacity: 1;
-      }
-
       > td.el-table__cell {
         background: rgba(var(--primary-rgb), 0.05) !important;
+      }
+      > td.el-table__cell:first-child::before {
+        opacity: 1;
       }
     }
   }
@@ -262,8 +262,8 @@ html, body {
 // 滚动条
 // ============================================================
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {

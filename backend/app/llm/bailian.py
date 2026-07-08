@@ -18,7 +18,7 @@ from dashscope import Generation, MultiModalConversation, TextEmbedding, TextReR
 from dashscope.api_entities.dashscope_response import Message
 
 from app.llm.base import (
-    ModelAdapter, ChatRequest, ChatResponse, ChatMessage, MessageRole
+    ModelAdapter, ChatRequest, ChatResponse, ChatMessage, MessageRole, ToolCall
 )
 from app.utils.images import encode_image_data_uri
 from app.core.config import settings
@@ -39,6 +39,50 @@ def _has_multimodal_content(messages: List[ChatMessage]) -> bool:
         if isinstance(msg.content, list):
             return True
     return False
+
+
+def _parse_tool_calls(raw_tool_calls) -> List[ToolCall]:
+    """从 dashscope 响应的 tool_calls 字段解析为 List[ToolCall]
+
+    dashscope 格式（OpenAI 兼容）：
+        [{"id": "call_xxx", "type": "function",
+          "function": {"name": "search_kb", "arguments": "{...json...}"}}]
+    """
+    import json as _json
+    out: List[ToolCall] = []
+    if not raw_tool_calls:
+        return out
+    for tc in raw_tool_calls:
+        try:
+            # tc 可能是 dict 或对象
+            if isinstance(tc, dict):
+                tc_id = tc.get("id", f"call_{len(out)}")
+                tc_type = tc.get("type", "function")
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "")
+                raw_args = fn.get("arguments", "{}")
+            else:
+                tc_id = getattr(tc, "id", f"call_{len(out)}") or f"call_{len(out)}"
+                tc_type = getattr(tc, "type", "function")
+                fn = getattr(tc, "function", None)
+                if fn is None:
+                    continue
+                fn_name = getattr(fn, "name", "")
+                raw_args = getattr(fn, "arguments", "{}")
+            # arguments 通常是 JSON 字符串
+            if isinstance(raw_args, str):
+                try:
+                    args_dict = _json.loads(raw_args) if raw_args.strip() else {}
+                except _json.JSONDecodeError:
+                    args_dict = {"_raw": raw_args}
+            elif isinstance(raw_args, dict):
+                args_dict = raw_args
+            else:
+                args_dict = {}
+            out.append(ToolCall(id=str(tc_id), name=str(fn_name), arguments=args_dict))
+        except Exception as e:
+            logger.debug(f"tool_call 解析失败跳过: {e}")
+    return out
 
 
 class BailianAdapter(ModelAdapter):
@@ -167,6 +211,11 @@ class BailianAdapter(ModelAdapter):
             "max_tokens": request.max_tokens,
             "result_format": "message",
         }
+        # 聚群 C: 透传 tools
+        if request.tools:
+            kwargs["tools"] = request.tools
+            if request.tool_choice is not None:
+                kwargs["tool_choice"] = request.tool_choice
         # dashscope SDK 调用是同步的，放到线程池里跑避免阻塞事件循环
         import asyncio
         loop = asyncio.get_event_loop()
@@ -178,7 +227,9 @@ class BailianAdapter(ModelAdapter):
             logger.error(f"百炼 Generation 失败: {response.code} - {response.message}")
             raise RuntimeError(f"百炼 API 错误 {response.code}: {response.message}")
 
-        content = response.output.choices[0].message.content
+        message = response.output.choices[0].message
+        content = message.content or ""
+        tool_calls = _parse_tool_calls(getattr(message, "tool_calls", None))
         usage = {
             "prompt_tokens": response.usage.input_tokens if response.usage else 0,
             "completion_tokens": response.usage.output_tokens if response.usage else 0,
@@ -190,6 +241,7 @@ class BailianAdapter(ModelAdapter):
             usage=usage,
             finish_reason=response.output.choices[0].finish_reason or "stop",
             raw=response,
+            tool_calls=tool_calls,
         )
 
     # ---- 多模态对话（MultiModalConversation）----

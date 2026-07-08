@@ -24,6 +24,7 @@ dist-ssr/
 *.local
 .vite/
 .cache/
+*.tsbuildinfo
 
 # Environment
 .env
@@ -50,6 +51,8 @@ backend/data/indexed/*
 !backend/data/indexed/.gitkeep
 backend/data/models/*
 !backend/data/models/.gitkeep
+backend/logs/*
+!backend/logs/.gitkeep
 *.log
 
 # Database

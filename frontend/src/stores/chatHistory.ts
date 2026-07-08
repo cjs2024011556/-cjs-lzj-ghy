@@ -6,11 +6,12 @@
  * - localStorage 持久化，debounce 500ms
  * - 第一条 user 消息作为对话标题
  * - 容量超限自动清理最旧
+ * - **多用户隔离**：每个用户的对话独立存于 `a1_chat_history_<username>`
  */
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 
-const STORAGE_KEY = 'a1_chat_history'
+const STORAGE_KEY_PREFIX = 'a1_chat_history_'
 const MAX_CONVERSATIONS = 50
 const TITLE_MAX_LEN = 30
 
@@ -51,10 +52,17 @@ function deriveTitle(messages: ChatMessage[]): string {
   return t.length > TITLE_MAX_LEN ? t.slice(0, TITLE_MAX_LEN) + '…' : t
 }
 
+function storageKeyFor(username: string | null): string {
+  // 未登录用 'guest' 兜底（不写盘）
+  return STORAGE_KEY_PREFIX + (username || 'guest')
+}
+
 export const useChatHistoryStore = defineStore('chatHistory', () => {
   const conversations = ref<Conversation[]>([])
   const activeId = ref<string | null>(null)
+  const currentUser = ref<string | null>(null)
   let saveTimer: number | null = null
+  let streamAbort: (() => void) | null = null  // 当前流式句柄（Home 注册）
 
   // ---- 计算属性 ----
   const activeConversation = computed<Conversation | null>(() => {
@@ -74,12 +82,13 @@ export const useChatHistoryStore = defineStore('chatHistory', () => {
 
   // ---- 持久化 ----
   function save() {
+    if (!currentUser.value) return  // 未登录不写盘
     try {
       const data = JSON.stringify({
         conversations: conversations.value,
         activeId: activeId.value,
       })
-      localStorage.setItem(STORAGE_KEY, data)
+      localStorage.setItem(storageKeyFor(currentUser.value), data)
     } catch (e) {
       console.warn('对话历史保存失败:', e)
     }
@@ -91,22 +100,70 @@ export const useChatHistoryStore = defineStore('chatHistory', () => {
   }
 
   function hydrate() {
+    if (!currentUser.value) {
+      // 未登录：清空内存
+      conversations.value = []
+      activeId.value = null
+      return
+    }
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
+      const raw = localStorage.getItem(storageKeyFor(currentUser.value))
       if (!raw) {
-        // 首次访问：自动创建一个空对话
-        create()
+        // 该用户首次访问：ChatGPT 行为 — 无对话，让用户点"新对话"开始
+        conversations.value = []
+        activeId.value = null
         return
       }
       const data = JSON.parse(raw)
       conversations.value = Array.isArray(data.conversations) ? data.conversations : []
       activeId.value = data.activeId ?? (conversations.value[0]?.id ?? null)
-      // 如果没有 active，对话列表也为空，创建一个
-      if (!activeId.value) create()
     } catch (e) {
       console.warn('对话历史恢复失败:', e)
-      create()
+      conversations.value = []
+      activeId.value = null
     }
+  }
+
+  /**
+   * 切换当前用户（登录后 / 登出时调用）
+   * - **abort 当前流式响应**（防止切用户后旧 conv 的 chunk 写到新用户盘上）
+   * - 立即把当前内存的对话写回上一个用户的 localStorage（防止数据丢失）
+   * - 重置内存，从新用户的 localStorage 读取
+   * - 必须在路由跳转到聊天页之前调用
+   */
+  function setUser(username: string | null) {
+    // 0. abort 当前流式（如果有）— 否则旧用户的 onDelta 会写到已被清空的 conversations
+    if (streamAbort) {
+      streamAbort()
+      streamAbort = null
+    }
+    // 1. 先把当前用户的数据 flush 到盘（如果有）
+    if (currentUser.value) {
+      // 取消 debounce 等待，立即写
+      if (saveTimer) {
+        clearTimeout(saveTimer)
+        saveTimer = null
+      }
+      save()
+    }
+    // 2. 切到新用户
+    currentUser.value = username
+    // 3. 从新用户的 localStorage 重新加载
+    hydrate()
+  }
+
+  /**
+   * 注册/清除当前流式 abort 句柄
+   * - Home.vue 在 streamChat 拿到句柄时调用 setStreamAbort
+   * - 流结束时（onDone/onError）调用 clearStreamAbort
+   * - setUser / 用户切换时会自动调用注册的 abort
+   */
+  function setStreamAbort(abort: (() => void) | null) {
+    streamAbort = abort
+  }
+
+  function clearStreamAbort() {
+    streamAbort = null
   }
 
   // 自动持久化
@@ -151,8 +208,8 @@ export const useChatHistoryStore = defineStore('chatHistory', () => {
     const conv = conversations.value.find((c) => c.id === id)
     if (!conv) return
     activeId.value = id
-    // 更新 updatedAt 让排序靠前
-    conv.updatedAt = nowIso()
+    // 不更新 updatedAt — ChatGPT 行为：仅查看/切换不改变排序
+    // 只有主动发消息（appendMessage）时才让对话排到顶部
   }
 
   function deleteConv(id: string) {
@@ -222,12 +279,16 @@ export const useChatHistoryStore = defineStore('chatHistory', () => {
     // state
     conversations,
     activeId,
+    currentUser,
     // computed
     activeConversation,
     activeMessages,
     sortedConversations,
     // actions
     hydrate,
+    setUser,
+    setStreamAbort,
+    clearStreamAbort,
     create,
     switchTo,
     deleteConv,

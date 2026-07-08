@@ -1,43 +1,59 @@
 <template>
   <aside class="chat-sidebar" :class="{ collapsed }">
-    <!-- 顶部：新建按钮 + 折叠 -->
+    <!-- 顶部：Logo + 新对话 + 折叠 -->
     <div class="sidebar-header">
-      <el-button type="primary" size="small" class="new-btn" @click="onNew">
-        <el-icon><Plus /></el-icon>
-        <span v-if="!collapsed">新对话</span>
-      </el-button>
-      <el-tooltip :content="collapsed ? '展开侧边栏' : '折叠侧边栏'" placement="bottom">
-        <el-button text circle @click="$emit('toggle-collapse')">
-          <el-icon><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
+      <div v-if="!collapsed" class="sidebar-brand">
+        <el-icon :size="18" color="var(--primary-color)"><ChatLineRound /></el-icon>
+        <span>智能问答</span>
+      </div>
+      <el-tooltip :content="collapsed ? '展开' : '折叠'" placement="bottom">
+        <el-button text circle size="small" @click="$emit('toggle-collapse')">
+          <el-icon :size="16"><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
         </el-button>
       </el-tooltip>
     </div>
 
+    <!-- 新对话按钮（ChatGPT 风格：圆角图标 + 文字） -->
+    <div v-if="!collapsed" class="new-conv-row">
+      <button class="new-btn" @click="onNew">
+        <el-icon :size="16"><Plus /></el-icon>
+        <span>新对话</span>
+      </button>
+    </div>
+
+    <!-- 搜索框（ChatGPT 风格） -->
+    <div v-if="!collapsed" class="search-row">
+      <el-input
+        v-model="searchKey"
+        size="small"
+        placeholder="搜索对话..."
+        clearable
+        class="search-input"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
+    </div>
+
     <!-- 对话列表 -->
     <div class="sidebar-list" v-if="!collapsed">
-      <div v-if="store.sortedConversations.length === 0" class="empty-hint">
-        <el-icon :size="20"><ChatLineRound /></el-icon>
-        <span>暂无对话</span>
+      <div v-if="filteredConvs.length === 0" class="empty-hint">
+        <el-icon :size="18"><ChatLineRound /></el-icon>
+        <span>{{ searchKey ? '无匹配对话' : '暂无对话' }}</span>
       </div>
 
       <div
-        v-for="conv in store.sortedConversations"
+        v-for="conv in filteredConvs"
         :key="conv.id"
         class="conv-item"
         :class="{ active: conv.id === store.activeId }"
         @click="store.switchTo(conv.id)"
       >
-        <el-icon class="conv-icon"><ChatLineRound /></el-icon>
-        <div class="conv-content">
-          <div class="conv-title">{{ conv.title || '新对话' }}</div>
-          <div class="conv-meta">
-            <span>{{ conv.messages.length }} 条消息</span>
-            <span class="dot">·</span>
-            <span>{{ formatRelativeTime(conv.updatedAt) }}</span>
-          </div>
-        </div>
+        <el-icon v-if="conv.id === store.activeId" class="conv-icon"><ChatLineRound /></el-icon>
+        <div class="conv-title">{{ conv.title || '新对话' }}</div>
         <el-dropdown trigger="click" @command="(cmd) => onCommand(cmd, conv.id)" @click.stop>
-          <el-button text circle class="conv-action" @click.stop>
+          <el-button text circle size="small" class="conv-action" @click.stop>
             <el-icon><MoreFilled /></el-icon>
           </el-button>
           <template #dropdown>
@@ -55,10 +71,19 @@
         </el-dropdown>
       </div>
     </div>
+
+    <!-- 底部：用户信息（折叠时也显示） -->
+    <div v-if="!collapsed" class="sidebar-footer">
+      <el-button text size="small" @click="onClearAll" class="clear-all-btn">
+        <el-icon><Delete /></el-icon>
+        <span>清空所有对话</span>
+      </el-button>
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus,
@@ -68,17 +93,42 @@ import {
   MoreFilled,
   Edit,
   Delete,
+  Search,
 } from '@element-plus/icons-vue'
-import { useChatHistoryStore, formatRelativeTime } from '@/stores/chatHistory'
+import { useChatHistoryStore } from '@/stores/chatHistory'
 
 defineProps<{ collapsed?: boolean }>()
 defineEmits<{ (e: 'toggle-collapse'): void }>()
 
 const store = useChatHistoryStore()
+const searchKey = ref('')
+
+// 搜索过滤（标题包含关键字的对话）
+const filteredConvs = computed(() => {
+  const key = searchKey.value.trim().toLowerCase()
+  if (!key) return store.sortedConversations
+  return store.sortedConversations.filter((c) =>
+    (c.title || '').toLowerCase().includes(key),
+  )
+})
 
 function onNew() {
   store.create()
   ElMessage.success('已创建新对话')
+}
+
+async function onClearAll() {
+  try {
+    await ElMessageBox.confirm(
+      `确定清空所有对话吗？共 ${store.conversations.length} 个对话将被删除，此操作不可恢复。`,
+      '清空所有对话',
+      { type: 'warning', confirmButtonText: '清空', cancelButtonText: '取消' },
+    )
+    store.clearAll()
+    ElMessage.success('已清空所有对话')
+  } catch {
+    // 取消
+  }
 }
 
 async function onCommand(cmd: string, convId: string) {
@@ -132,32 +182,69 @@ async function onCommand(cmd: string, convId: string) {
 .sidebar-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 8px;
   gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+// ChatGPT 风格：新对话按钮 — 自定义圆角按钮（不用 element 默认色）
+.new-conv-row {
+  padding: 4px 8px 8px;
 }
 
 .new-btn {
-  flex: 1;
-  justify-content: flex-start;
-  background: rgba(var(--primary-rgb), 0.12) !important;
-  border-color: rgba(var(--primary-rgb), 0.3) !important;
-  color: var(--primary-color) !important;
-  font-weight: var(--font-weight-medium);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
 
   &:hover {
-    background: rgba(var(--primary-rgb), 0.2) !important;
-    border-color: var(--primary-color) !important;
+    background: var(--bg-tertiary);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+  }
+}
+
+// ChatGPT 风格：搜索框
+.search-row {
+  padding: 0 8px 8px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  background: transparent;
+  border-radius: 8px;
+  padding: 2px 8px;
+  box-shadow: 0 0 0 1px var(--border-color) inset;
+
+  &:hover, &.is-focus {
+    box-shadow: 0 0 0 1px var(--primary-color) inset;
   }
 }
 
 .sidebar-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 4px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 
   &::-webkit-scrollbar { width: 4px; }
 }
@@ -166,21 +253,21 @@ async function onCommand(cmd: string, convId: string) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 32px 16px;
+  gap: 6px;
+  padding: 24px 12px;
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
 }
 
+// ChatGPT 风格：极简对话项
 .conv-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all var(--transition-fast);
-  border: 1px solid transparent;
+  transition: background var(--transition-fast);
   position: relative;
 
   &:hover {
@@ -191,49 +278,47 @@ async function onCommand(cmd: string, convId: string) {
 
   &.active {
     background: rgba(var(--primary-rgb), 0.12);
-    border-color: rgba(var(--primary-rgb), 0.4);
 
-    .conv-title { color: var(--primary-color); }
+    .conv-title { color: var(--primary-color); font-weight: var(--font-weight-semibold); }
   }
 }
 
 .conv-icon {
-  color: var(--text-muted);
+  color: var(--primary-color);
   flex-shrink: 0;
-  font-size: 16px;
-
-  .conv-item.active & { color: var(--primary-color); }
-}
-
-.conv-content {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
+  font-size: 14px;
 }
 
 .conv-title {
+  flex: 1;
+  min-width: 0;
   font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 2px;
-}
-
-.conv-meta {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  display: flex;
-  gap: 4px;
-  align-items: center;
-
-  .dot { opacity: 0.5; }
 }
 
 .conv-action {
   opacity: 0;
   transition: opacity var(--transition-fast);
   flex-shrink: 0;
+}
+
+// 底部清空按钮
+.sidebar-footer {
+  padding: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.clear-all-btn {
+  width: 100%;
+  justify-content: flex-start;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+
+  &:hover {
+    color: var(--danger);
+  }
 }
 </style>

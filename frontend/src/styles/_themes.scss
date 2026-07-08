@@ -39,10 +39,10 @@
   --danger: #ef4444;
   --info: #3b82f6;
 
-  // 滚动条
-  --scrollbar-track: #f8fafc;
-  --scrollbar-thumb: #cbd5e1;
-  --scrollbar-thumb-hover: #94a3b8;
+  // 滚动条（ChatGPT 风格：细 + 半透明，hover 才显眼）
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(15, 23, 42, 0.15);
+  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.3);
 
   // 阴影（柔和）
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);

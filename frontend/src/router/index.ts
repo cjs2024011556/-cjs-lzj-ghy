@@ -23,7 +23,7 @@ const routes: RouteRecordRaw[] = [
         path: 'home',
         name: 'Home',
         component: () => import('@/views/Home.vue'),
-        meta: { title: '首页', icon: 'HomeFilled', keepAlive: true, group: '业务', showChatSidebar: true },
+        meta: { title: '智能问答', icon: 'HomeFilled', keepAlive: true, group: '业务', showChatSidebar: true },
       },
       {
         path: 'retrieval',
@@ -48,6 +48,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Graph',
         component: () => import('@/views/Graph.vue'),
         meta: { title: '故障图谱', icon: 'Share', keepAlive: true, group: '业务' },
+      },
+      {
+        path: 'eval-report',
+        name: 'EvalReport',
+        component: () => import('@/views/EvalReport.vue'),
+        meta: { title: '评测报告', icon: 'DataAnalysis', keepAlive: true, group: '业务' },
       },
       {
         path: 'knowledge-admin',

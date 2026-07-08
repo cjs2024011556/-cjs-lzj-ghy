@@ -72,3 +72,35 @@ async def build_graph():
     except Exception as e:
         logger.error(f"图谱构建失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/node/{node_id}/neighborhood")
+async def node_neighborhood(node_id: str):
+    """获取节点详情 + 1-hop 邻居（按方向 + 关系类型分组）
+
+    用于 Graph.vue 点击节点后的详情面板：
+    - node: 节点完整属性
+    - outgoing: 出边邻居（按 rel_type 分组）
+    - incoming: 入边邻居（按 rel_type 分组）
+    - summary: 统计摘要
+    """
+    try:
+        gs = get_graph_service()
+        return gs.get_node_neighborhood(node_id)
+    except Exception as e:
+        logger.error(f"节点邻域查询失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics")
+async def graph_analytics():
+    """图谱分析指标（中心度 Top 5 / 连通分量 / 节点类型密度 / 最短路径示例）
+
+    用于 Graph.vue 「图谱分析」面板 — 企业用户视角的洞察。
+    """
+    try:
+        gs = get_graph_service()
+        return gs.get_analytics()
+    except Exception as e:
+        logger.error(f"图谱分析失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -2,6 +2,7 @@
 聊天 API（首页 - ChatGPT 风格）
 - POST /api/v1/chat  智能对话（意图识别 + RAG 路由）
 - POST /api/v1/chat/stream  流式（SSE）
+- POST /api/v1/chat/agent  工具链（聚群 C ReAct Agent，SSE）
 """
 import time
 from typing import List, Optional, Dict, Any, Tuple
@@ -13,6 +14,7 @@ from app.llm.base import ChatRequest, ChatMessage, MessageRole
 from app.core.config import settings
 from app.core.logger import logger
 from app.services.retrieval_service import RetrievalService
+from app.services.keyword_cache import read_cached_json, read_cached_manuals
 from fastapi.responses import StreamingResponse
 
 router = APIRouter()
@@ -64,7 +66,7 @@ def _history_to_messages(history: List["ChatTurnMessage"], last_n: int = 6) -> L
 
 
 def _hits_to_sources(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Milvus hits → sources 列表"""
+    """Milvus hits → sources 列表（聚群 A: 透传结构化字段 + 聚群 B: 视觉理解字段）"""
     return [
         {
             "chunk_id": h.get("chunk_id", ""),
@@ -73,6 +75,17 @@ def _hits_to_sources(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "score": h.get("score", 0.0),
             "equipment_type": h.get("equipment_type", ""),
             "equipment_model": h.get("equipment_model", ""),
+            # PDF-A.5 聚群 A
+            "page_number": h.get("page_number", 0),
+            "page_end": h.get("page_end", 0),
+            "chapter": h.get("chapter", ""),
+            "section_title": h.get("section_title", ""),
+            "section_type": h.get("section_type", "text"),
+            "section_level": h.get("section_level", 0),
+            "doc_id": h.get("doc_id", ""),
+            # PDF-B.5 聚群 B
+            "image_description": h.get("image_description", ""),
+            "image_facts": h.get("image_facts", ""),
         }
         for h in hits
     ]
@@ -155,6 +168,17 @@ class ChatSource(BaseModel):
     score: float
     equipment_type: str = ""
     equipment_model: str = ""
+    # PDF-A.5 聚群 A: 结构化字段
+    page_number: Optional[int] = 0
+    page_end: Optional[int] = 0
+    chapter: Optional[str] = ""
+    section_title: Optional[str] = ""
+    section_type: Optional[str] = "text"
+    section_level: Optional[int] = 0
+    doc_id: Optional[str] = ""
+    # PDF-B.5 聚群 B: 视觉理解字段
+    image_description: Optional[str] = ""
+    image_facts: Optional[str] = ""
 
 
 class ChatResponseModel(BaseModel):
@@ -317,6 +341,128 @@ async def chat_stream(req: ChatStreamRequest):
     )
 
 
+# ============================================================
+# 聚群 C: 工具链 ReAct Agent 端点（SSE）
+# ============================================================
+class ChatAgentRequest(BaseModel):
+    """工具链 Agent 请求"""
+    message: str = Field(..., min_length=1, max_length=2000)
+    history: List[ChatTurnMessage] = Field(default_factory=list)
+    max_steps: int = Field(default=5, ge=1, le=10)
+
+
+async def _stream_agent_chat(req: ChatAgentRequest):
+    """聚群 C: ReAct Agent SSE 流"""
+    from app.services.agent_service import AgentService
+    import asyncio as _asyncio
+
+    start = time.time()
+    try:
+        adapter = get_model_adapter()
+    except Exception as e:
+        yield _sse_format("error", {"message": f"模型未就绪: {e}"})
+        return
+
+    try:
+        agent = AgentService(max_steps=req.max_steps)
+    except Exception as e:
+        yield _sse_format("error", {"message": f"Agent 初始化失败: {e}"})
+        return
+
+    # 构造 history 给 agent
+    history_dicts = None
+    if req.history:
+        history_dicts = [
+            {"role": h.role, "content": h.content} for h in req.history[-6:]
+        ]
+
+    final_answer = ""
+    step_count = 0
+    try:
+        async for event in agent.run(req.message, history=history_dicts, adapter=adapter):
+            step_count += 1
+            if event.type == "answer":
+                final_answer = event.data.get("content", "")
+            yield _sse_format(event.type, event.data)
+            # 给前端一点喘息时间
+            await _asyncio.sleep(0)
+    except Exception as e:
+        logger.exception("Agent 流式失败")
+        yield _sse_format("error", {"message": str(e)})
+        return
+
+    latency = (time.time() - start) * 1000
+    yield _sse_format("done", {
+        "model": getattr(adapter, "model_name", "unknown"),
+        "latency_ms": round(latency, 1),
+        "events_count": step_count,
+        "final_answer": final_answer,
+    })
+
+
+@router.post("/agent")
+async def chat_agent(req: ChatAgentRequest):
+    """聚群 C: 工具链 ReAct Agent（SSE）
+
+    协议：
+    - event: thought      LLM 思考（content）
+    - event: tool_call    工具调用 {id, name, arguments}
+    - event: tool_result  工具返回 {id, name, ok, result}
+    - event: answer       最终答案
+    - event: error        错误
+    - event: done         完成 {model, latency_ms, events_count, final_answer}
+    """
+    return StreamingResponse(
+        _stream_agent_chat(req),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ============================================================
+# 聚群 C: 评测端点（Eval Report）
+# ============================================================
+@router.get("/eval/run")
+async def run_eval(top_k: int = 5, save_path: Optional[str] = None):
+    """聚群 C: 跑评测黄金集，输出 JSON 报告
+
+    Args:
+        top_k: 检索 top-k（默认 5）
+        save_path: 可选，保存到指定路径（默认 backend/logs/eval_report.json）
+    """
+    from app.services.eval.runner import run_evaluation, save_report
+    try:
+        report = await run_evaluation(top_k=top_k)
+        if save_path:
+            try:
+                save_report(report, save_path)
+            except Exception as e:
+                logger.warning(f"保存评测报告失败: {e}")
+        return report
+    except Exception as e:
+        logger.exception("评测失败")
+        raise HTTPException(status_code=500, detail=f"评测失败: {e}")
+
+
+@router.get("/eval/report")
+async def get_eval_report(path: str = "logs/eval_report.json"):
+    """聚群 C: 读取已保存的评测报告（默认 backend/logs/eval_report.json）"""
+    from pathlib import Path as _P
+    backend_root = _P(__file__).resolve().parents[3]
+    full = backend_root / path
+    if not full.exists():
+        raise HTTPException(status_code=404, detail=f"报告不存在: {path}")
+    try:
+        import json as _json
+        return _json.loads(full.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读报告失败: {e}")
+
+
 async def _casual_chat(adapter, message: str, history: List[ChatTurnMessage]) -> str:
     """普通闲聊（无 RAG）"""
     # 构造多轮消息
@@ -346,19 +492,22 @@ async def _casual_chat(adapter, message: str, history: List[ChatTurnMessage]) ->
 async def _keyword_fallback(query: str, top_k: int) -> tuple:
     """关键词降级 RAG（Milvus 不可用时）
 
-    1. 从故障案例库（10 个）按关键词匹配
-    2. 从 SOP 库（4 个）按设备类型匹配
-    返回: (sources, context_text)
+    1. 从故障案例库按关键词匹配
+    2. 从 SOP 库按设备类型匹配
+    3. 关键词命中手册段落
+
+    性能优化（H-Fix-3）：文件读磁盘 cache 到模块级 _CACHE，mtime 检测自动失效。
+    之前每个请求都同步 read_text() 多次（2 个 JSON + N 个 MD），热路径下数量级提升。
+
+    Returns: (sources, context_text)
     """
-    from app.services.knowledge_service import KnowledgeService
-    from app.services.knowledge_service import KnowledgeService
     from app.core.config import CASES_FILE, SOPS_FILE, MANUALS_DIR
     from app.utils.text import extract_keywords
-    import json as json_mod
 
-    # 1. 关键词命中案例
-    cases = json_mod.loads(CASES_FILE.read_text(encoding="utf-8"))
     keywords = extract_keywords(query)
+
+    # 1. 关键词命中案例（cache）
+    cases = read_cached_json(CASES_FILE, default=[])
 
     matched_cases = []
     for c in cases:
@@ -389,6 +538,17 @@ async def _keyword_fallback(query: str, top_k: int) -> tuple:
             "score": float(score),
             "equipment_type": c.get("equipment_type", ""),
             "equipment_model": c.get("equipment_model", ""),
+            # PDF-A.5: 案例/SOP 无结构化字段
+            "page_number": 0,
+            "page_end": 0,
+            "chapter": "",
+            "section_title": "",
+            "section_type": "text",
+            "section_level": 0,
+            "doc_id": "",
+            # PDF-B.5: 案例无视觉理解字段
+            "image_description": "",
+            "image_facts": "",
         })
         context_parts.append(
             f"### 案例 {c['case_id']}：{c['title']}\n"
@@ -397,8 +557,8 @@ async def _keyword_fallback(query: str, top_k: int) -> tuple:
             f"解决方案：{c.get('solution', '')}\n"
         )
 
-    # 2. 匹配 SOP
-    sops = json_mod.loads(SOPS_FILE.read_text(encoding="utf-8"))
+    # 2. 匹配 SOP（cache）
+    sops = read_cached_json(SOPS_FILE, default=[])
     for s in sops:
         if any(kw in s.get("equipment_type", "") for kw in keywords) or \
            any(kw in s.get("name", "") for kw in keywords):
@@ -409,6 +569,17 @@ async def _keyword_fallback(query: str, top_k: int) -> tuple:
                 "score": 0.5,
                 "equipment_type": s.get("equipment_type", ""),
                 "equipment_model": "",
+                # PDF-A.5
+                "page_number": 0,
+                "page_end": 0,
+                "chapter": "",
+                "section_title": s.get("name", ""),
+                "section_type": "text",
+                "section_level": 0,
+                "doc_id": "",
+                # PDF-B.5
+                "image_description": "",
+                "image_facts": "",
             })
             context_parts.append(
                 f"### SOP {s['sop_id']}：{s['name']}\n"
@@ -418,36 +589,42 @@ async def _keyword_fallback(query: str, top_k: int) -> tuple:
                 f"步骤数：{len(s.get('steps', []))}\n"
             )
 
-    # 3. 关键词命中手册段落（manuals/*.md 按 ## 标题切分）
-    if MANUALS_DIR.exists():
-        import re as re_mod  # 仅 manuals 切分需要
-        for manual_path in MANUALS_DIR.glob("*.md"):
-            try:
-                text = manual_path.read_text(encoding="utf-8")
-            except Exception:
+    # 3. 关键词命中手册段落（manuals/*.md 按 ## 标题切分，cache）
+    manuals = read_cached_manuals(MANUALS_DIR)
+    import re as re_mod
+    for stem, text in manuals.items():
+        sections = re_mod.split(r'(?=^## )', text, flags=re_mod.MULTILINE)
+        for sec in sections:
+            sec = sec.strip()
+            if len(sec) < 20:
                 continue
-            # 按 ## 标题切分段落（保留标题）
-            sections = re_mod.split(r'(?=^## )', text, flags=re_mod.MULTILINE)
-            for sec in sections:
-                sec = sec.strip()
-                if len(sec) < 20:
-                    continue
-                # 段落标题（第一行） + 内容
-                first_line = sec.split('\n', 1)[0].strip()
-                score = sum(1 for kw in keywords if kw in sec)
-                if score > 0:
-                    sources.append({
-                        "chunk_id": f"manual:{manual_path.stem}#{hash(first_line) & 0xffff:#04x}",
-                        "content": sec[:500],  # 限制每段 500 字
-                        "source": f"手册/{manual_path.stem}",
-                        "score": float(score * 0.7),  # 手册权重略低
-                        "equipment_type": "",
-                        "equipment_model": "",
-                    })
-                    context_parts.append(
-                        f"### 手册《{manual_path.stem}》 - {first_line}\n"
-                        + sec[:400]
-                    )
+            # 段落标题（第一行） + 内容
+            first_line = sec.split('\n', 1)[0].strip()
+            score = sum(1 for kw in keywords if kw in sec)
+            if score > 0:
+                sources.append({
+                    "chunk_id": f"manual:{stem}#{hash(first_line) & 0xffff:#04x}",
+                    "content": sec[:500],  # 限制每段 500 字
+                    "source": f"手册/{stem}",
+                    "score": float(score * 0.7),  # 手册权重略低
+                    "equipment_type": "",
+                    "equipment_model": "",
+                    # PDF-A.5
+                    "page_number": 0,
+                    "page_end": 0,
+                    "chapter": "",
+                    "section_title": first_line,
+                    "section_type": "text",
+                    "section_level": 2,
+                    "doc_id": f"md:{stem}",
+                    # PDF-B.5
+                    "image_description": "",
+                    "image_facts": "",
+                })
+                context_parts.append(
+                    f"### 手册《{stem}》 - {first_line}\n"
+                    + sec[:400]
+                )
 
     # 按 score 降序排，截 top_k
     sources.sort(key=lambda x: -x["score"])
@@ -456,6 +633,12 @@ async def _keyword_fallback(query: str, top_k: int) -> tuple:
     context_parts = context_parts[:top_k]
 
     return sources, "\n".join(context_parts) if context_parts else ""
+
+
+# ============================================================
+# H-Fix-3: keyword_fallback 文件 cache（已抽到 app.services.keyword_cache 复用）
+# ============================================================
+from app.services.keyword_cache import invalidate as invalidate_keyword_cache
 
 
 async def _answer_with_context(adapter, message: str, context: str, history: List[ChatTurnMessage]) -> str:

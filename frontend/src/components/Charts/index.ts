@@ -3,7 +3,7 @@
  * 只注册业务需要的 chart type 和 component
  */
 import * as echarts from 'echarts/core'
-import { LineChart, PieChart, GaugeChart, HeatmapChart, BarChart } from 'echarts/charts'
+import { LineChart, PieChart, GaugeChart, HeatmapChart, BarChart, GraphChart } from 'echarts/charts'
 import {
   TitleComponent,
   TooltipComponent,
@@ -22,6 +22,7 @@ echarts.use([
   GaugeChart,
   HeatmapChart,
   BarChart,
+  GraphChart,
   TitleComponent,
   TooltipComponent,
   LegendComponent,

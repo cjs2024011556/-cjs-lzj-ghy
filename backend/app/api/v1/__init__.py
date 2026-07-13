@@ -1,10 +1,11 @@
 """V1 API 路由聚合"""
 from fastapi import APIRouter
 
-from app.api.v1 import health, retrieval, operation_guide, knowledge, llm_admin, audio, graph, chat, constants
+from app.api.v1 import health, retrieval, operation_guide, knowledge, llm_admin, audio, graph, chat, constants, auth
 
 api_router = APIRouter()
 api_router.include_router(health.router, prefix="/health", tags=["健康检查"])
+api_router.include_router(auth.router, prefix="/auth", tags=["用户认证"])
 api_router.include_router(llm_admin.router, prefix="/llm", tags=["LLM 管理"])
 api_router.include_router(audio.router, prefix="/audio", tags=["5 模型-语音/全模态"])
 api_router.include_router(retrieval.router, prefix="/retrieval", tags=["多模态检索"])

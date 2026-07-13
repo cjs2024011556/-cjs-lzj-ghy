@@ -1,5 +1,5 @@
 <template>
-  <div class="login-page">
+  <div class="register-page">
     <!-- 背景装饰 -->
     <div class="bg-decoration">
       <div class="grid-pattern"></div>
@@ -7,7 +7,7 @@
       <div class="glow glow-2"></div>
     </div>
 
-    <div class="login-container">
+    <div class="register-container">
       <!-- 左侧：品牌区 -->
       <div class="brand-side">
         <div class="brand-content">
@@ -31,40 +31,74 @@
         </div>
       </div>
 
-      <!-- 右侧：登录表单 -->
+      <!-- 右侧：注册表单 -->
       <div class="form-side">
-        <el-card class="login-card" shadow="always">
-          <h2 class="form-title">欢迎登录</h2>
-          <p class="form-desc">请使用您的账号登录系统</p>
+        <el-card class="register-card" shadow="always">
+          <h2 class="form-title">创建新账号</h2>
+          <p class="form-desc">请填写以下信息完成注册</p>
 
           <el-form
             ref="formRef"
             :model="form"
             :rules="rules"
             size="large"
-            @keyup.enter="onLogin"
+            @keyup.enter="onRegister"
           >
             <el-form-item prop="username">
               <el-input
                 v-model="form.username"
-                placeholder="账号"
+                placeholder="账号（字母开头，3-20 位）"
                 :prefix-icon="User"
                 clearable
                 autocomplete="username"
               />
             </el-form-item>
+            <el-form-item prop="full_name">
+              <el-input
+                v-model="form.full_name"
+                placeholder="姓名"
+                :prefix-icon="UserFilled"
+                clearable
+              />
+            </el-form-item>
+            <el-form-item prop="department">
+              <el-input
+                v-model="form.department"
+                placeholder="部门（可选）"
+                :prefix-icon="OfficeBuilding"
+                clearable
+              />
+            </el-form-item>
+            <el-form-item prop="role" label="角色">
+              <el-radio-group v-model="form.role" class="role-radio">
+                <el-radio-button value="engineer">普通用户</el-radio-button>
+                <el-radio-button value="admin">系统管理员</el-radio-button>
+              </el-radio-group>
+              <div class="role-hint">
+                <el-icon :size="14"><InfoFilled /></el-icon>
+                <span v-if="form.role === 'admin'">系统管理员：拥有后台管理、知识库管理等全部权限</span>
+                <span v-else>普通用户：使用知识检索、作业指引、智能问答等业务功能</span>
+              </div>
+            </el-form-item>
             <el-form-item prop="password">
               <el-input
                 v-model="form.password"
                 type="password"
-                placeholder="密码"
+                placeholder="密码（至少 6 位）"
                 :prefix-icon="Lock"
                 show-password
-                autocomplete="current-password"
+                autocomplete="new-password"
               />
             </el-form-item>
-            <el-form-item>
-              <el-checkbox v-model="form.remember">记住我（30 天免登录）</el-checkbox>
+            <el-form-item prop="confirm_password">
+              <el-input
+                v-model="form.confirm_password"
+                type="password"
+                placeholder="确认密码"
+                :prefix-icon="Lock"
+                show-password
+                autocomplete="new-password"
+              />
             </el-form-item>
             <el-form-item>
               <el-button
@@ -72,30 +106,15 @@
                 size="large"
                 :loading="loading"
                 style="width: 100%"
-                @click="onLogin"
+                @click="onRegister"
               >
-                登 录
+                注 册
               </el-button>
             </el-form-item>
           </el-form>
 
-          <el-divider>演示账号（密码均为 123456）</el-divider>
-          <div class="quick-accounts">
-            <el-tag
-              v-for="acc in MOCK_USERS"
-              :key="acc.user.username"
-              :type="form.username === acc.user.username ? 'primary' : 'info'"
-              effect="dark"
-              class="account-tag"
-              @click="useAccount(acc.user.username)"
-            >
-              <el-icon><UserFilled /></el-icon>
-              {{ acc.user.display_name }}（{{ acc.user.role }}）
-            </el-tag>
-          </div>
-
-          <div class="register-link">
-            还没有账号？<el-link type="primary" :underline="false" @click="goRegister">立即注册</el-link>
+          <div class="login-link">
+            已有账号？<el-link type="primary" :underline="false" @click="goLogin">立即登录</el-link>
           </div>
         </el-card>
       </div>
@@ -104,11 +123,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { User, Lock, UserFilled, Check, Tools } from '@element-plus/icons-vue'
-import { useAuthStore, MOCK_USERS } from '@/stores/auth'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { User, Lock, UserFilled, Check, Tools, OfficeBuilding, InfoFilled } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -117,40 +136,64 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 
 const form = ref({
-  username: 'admin',
-  password: '123456',
-  remember: true,
+  username: '',
+  password: '',
+  confirm_password: '',
+  full_name: '',
+  department: '',
+  role: 'engineer' as 'admin' | 'engineer',
 })
 
+// 用户名校验：字母开头，3-20 位字母/数字/下划线
+const usernamePattern = /^[A-Za-z][A-Za-z0-9_]{2,19}$/
+
+const validateUsername = (_rule: unknown, value: string, callback: (err?: Error) => void) => {
+  if (!value) return callback(new Error('请输入账号'))
+  if (!usernamePattern.test(value)) {
+    return callback(new Error('账号必须以字母开头，仅含字母/数字/下划线，长度 3-20 位'))
+  }
+  callback()
+}
+
+const validateConfirmPassword = (_rule: unknown, value: string, callback: (err?: Error) => void) => {
+  if (!value) return callback(new Error('请再次输入密码'))
+  if (value !== form.value.password) return callback(new Error('两次输入的密码不一致'))
+  callback()
+}
+
 const rules: FormRules = {
-  username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }, { min: 6, message: '密码至少 6 位', trigger: 'blur' }],
+  username: [{ validator: validateUsername, trigger: 'blur' }],
+  full_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
+  role: [{ required: true, message: '请选择角色', trigger: 'change' }],
+  password: [{ required: true, min: 6, message: '密码至少 6 位', trigger: 'blur' }],
+  confirm_password: [{ validator: validateConfirmPassword, trigger: 'blur' }],
 }
 
-function useAccount(username: string) {
-  form.value.username = username
-  form.value.password = '123456'
-  ElMessage.info(`已填入 ${MOCK_USERS[username].user.display_name} 的账号`)
-}
-
-function goRegister() {
-  router.push('/register')
-}
-
-async function onLogin() {
+async function onRegister() {
   if (!formRef.value) return
   await formRef.value.validate(async (valid) => {
     if (!valid) return
     loading.value = true
     try {
-      // 模拟 0.5s 网络延迟
-      await new Promise((r) => setTimeout(r, 500))
-      const result = auth.login(form.value.username, form.value.password)
+      const result = auth.register({
+        username: form.value.username.trim(),
+        password: form.value.password,
+        confirm_password: form.value.confirm_password,
+        full_name: form.value.full_name.trim(),
+        department: form.value.department.trim(),
+        role: form.value.role,
+      })
       if (result.success) {
-        ElMessage.success(`欢迎回来，${auth.displayName}！`)
-        router.push((router.currentRoute.value.query.redirect as string) || '/home')
+        ElMessage.success('注册成功，正在为您登录…')
+        // 自动用新账号登录
+        const loginRes = auth.login(form.value.username.trim(), form.value.password)
+        if (loginRes.success) {
+          router.push('/home')
+        } else {
+          router.push('/login')
+        }
       } else {
-        ElMessage.error(result.message || '登录失败')
+        ElMessage.error(result.message || '注册失败')
       }
     } finally {
       loading.value = false
@@ -158,21 +201,13 @@ async function onLogin() {
   })
 }
 
-onMounted(() => {
-  if (auth.isLoggedIn) {
-    ElMessageBox.confirm(
-      '您已登录，是否直接进入系统？',
-      '已登录',
-      { confirmButtonText: '进入', cancelButtonText: '切换账号', type: 'info' },
-    )
-      .then(() => router.push('/home'))
-      .catch(() => auth.logout())
-  }
-})
+function goLogin() {
+  router.push('/login')
+}
 </script>
 
 <style lang="scss" scoped>
-.login-page {
+.register-page {
   position: relative;
   width: 100vw;
   height: 100vh;
@@ -222,7 +257,7 @@ onMounted(() => {
   opacity: 0.1;
 }
 
-.login-container {
+.register-container {
   position: relative;
   z-index: 1;
   display: flex;
@@ -302,7 +337,7 @@ onMounted(() => {
   padding: 48px;
 }
 
-.login-card {
+.register-card {
   width: 100%;
   background: var(--bg-secondary) !important;
   border: 1px solid var(--border-color) !important;
@@ -323,23 +358,31 @@ onMounted(() => {
   margin: 0 0 var(--spacing-lg) 0;
 }
 
-.quick-accounts {
+.role-radio {
+  width: 100%;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-sm);
-}
 
-.account-tag {
-  cursor: pointer;
-  padding: var(--spacing-xs) var(--spacing-sm);
-  transition: all var(--transition-fast);
+  :deep(.el-radio-button) {
+    flex: 1;
 
-  &:hover {
-    transform: translateY(-1px);
+    .el-radio-button__inner {
+      width: 100%;
+      box-sizing: border-box;
+    }
   }
 }
 
-.register-link {
+.role-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.login-link {
   margin-top: var(--spacing-md);
   text-align: center;
   font-size: var(--font-size-sm);
@@ -350,6 +393,6 @@ onMounted(() => {
 @media (max-width: 900px) {
   .brand-side { display: none; }
   .form-side { flex: 1; padding: 24px; }
-  .login-container { max-width: 480px; }
+  .register-container { max-width: 480px; }
 }
 </style>
